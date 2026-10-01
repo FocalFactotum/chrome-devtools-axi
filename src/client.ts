@@ -8,6 +8,7 @@ import { request } from "node:http";
 import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import {
+  AMBIENT_REQUEST_HEADER,
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   PAGE_IDENTITY_CHANGED_ERROR,
   resolveBridgeScript,
@@ -97,10 +98,18 @@ function httpGet(
   port: number,
   path: string,
   timeoutMs = 2000,
+  headers: Record<string, string> = {},
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = request(
-      { hostname: "127.0.0.1", port, path, method: "GET", timeout: timeoutMs },
+      {
+        hostname: "127.0.0.1",
+        port,
+        path,
+        method: "GET",
+        timeout: timeoutMs,
+        headers,
+      },
       (res) => {
         let data = "";
         res.on("data", (chunk) => (data += chunk));
@@ -121,6 +130,7 @@ function httpPost(
   path: string,
   body: unknown,
   timeoutMs = 120_000,
+  headers: Record<string, string> = {},
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
@@ -132,6 +142,7 @@ function httpPost(
         method: "POST",
         timeout: timeoutMs,
         headers: {
+          ...headers,
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(payload),
         },
@@ -172,6 +183,9 @@ function httpPost(
  * With `notice`, a healthy *deep* probe writes the bridge's `pageIdentityChanged`
  * flag into that caller-owned holder (see {@link PageIdentityNotice}).
  *
+ * With `ambient`, the probe is marked as observation only, so it does not
+ * renew an opted-in idle timeout (see {@link AMBIENT_REQUEST_HEADER}).
+ *
  * Exported for tests; production code uses it via {@link ensureBridge}.
  */
 export async function checkBridgeHealth(
@@ -180,12 +194,13 @@ export async function checkBridgeHealth(
     deep?: boolean;
     expectedSession?: string;
     notice?: PageIdentityNotice;
+    ambient?: boolean;
   } = {},
 ): Promise<boolean> {
   try {
     const path = opts.deep ? "/health?deep=1" : "/health";
     const timeoutMs = opts.deep ? DEEP_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS;
-    const resp = await httpGet(port, path, timeoutMs);
+    const resp = await httpGet(port, path, timeoutMs, ambientHeaders(opts));
     const data = JSON.parse(resp);
     if (data.status !== "ok") return false;
     if (
@@ -591,6 +606,10 @@ export async function ensureBridge(
   );
 }
 
+function ambientHeaders(opts: { ambient?: boolean }): Record<string, string> {
+  return opts.ambient ? { [AMBIENT_REQUEST_HEADER]: "1" } : {};
+}
+
 function parseCallResponse(resp: string): string {
   const data = JSON.parse(resp);
   if (data.error) {
@@ -603,11 +622,17 @@ async function postTool(
   port: number,
   name: string,
   args: Record<string, unknown>,
-  opts: { roots?: string[]; timeoutMs?: number } = {},
+  opts: { roots?: string[]; timeoutMs?: number; ambient?: boolean } = {},
 ): Promise<string> {
   const body: Record<string, unknown> = { name, args };
   if (opts.roots && opts.roots.length > 0) body.roots = opts.roots;
-  const resp = await httpPost(port, "/call", body, opts.timeoutMs);
+  const resp = await httpPost(
+    port,
+    "/call",
+    body,
+    opts.timeoutMs,
+    ambientHeaders(opts),
+  );
   return parseCallResponse(resp);
 }
 
@@ -882,7 +907,8 @@ export function mapErrorMessage(message: string): CdpError {
  * Get the current page snapshot without starting the bridge.
  *
  * Returns null if the bridge is not running or healthy. This is the ambient
- * home view / SessionStart probe, so it must stay cheap and never throw: an
+ * home view / SessionStart probe, so it must stay cheap, never throw, and never
+ * renew an opted-in idle timeout (both requests are marked ambient): an
  * invalid `CHROME_DEVTOOLS_AXI_SESSION` degrades to "no active session" (null)
  * here, while action commands (`ensureBridge` / `stopBridge`) still fail loudly.
  */
@@ -899,7 +925,10 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     return null;
   }
   if (
-    !(await checkBridgeHealth(pidInfo.port, { expectedSession: sessionName }))
+    !(await checkBridgeHealth(pidInfo.port, {
+      expectedSession: sessionName,
+      ambient: true,
+    }))
   ) {
     return null;
   }
@@ -910,7 +939,7 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
       pidInfo.port,
       "take_snapshot",
       { pageId },
-      { timeoutMs: 5000 },
+      { timeoutMs: 5000, ambient: true },
     );
   } catch {
     return null;

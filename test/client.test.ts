@@ -19,6 +19,7 @@ import {
   PAGE_IDENTITY_CHANGED_ERROR,
   type BridgeClient,
 } from "../src/bridge.js";
+import { AMBIENT_REQUEST_HEADER } from "../src/bridge-script.js";
 import { setSelectedPageId } from "../src/selected-page.js";
 import {
   buildBridgeEarlyExitError,
@@ -699,12 +700,17 @@ function startFakeCallBridge(opts: FakeCallBridgeOptions): Promise<{
   calls: { name: string; args: Record<string, unknown> }[];
   /** The `roots` field seen on each `/call`, in lockstep with `calls`. */
   roots: (string[] | undefined)[];
+  /** Every request, as `METHOD /path`, suffixed ` ambient` when so marked. */
+  requests: string[];
   close: () => Promise<void>;
 }> {
   return new Promise((resolveStart, rejectStart) => {
     const calls: { name: string; args: Record<string, unknown> }[] = [];
     const roots: (string[] | undefined)[] = [];
+    const requests: string[] = [];
     const server = createServer((req, res) => {
+      const ambient = req.headers[AMBIENT_REQUEST_HEADER] === "1";
+      requests.push(`${req.method} ${req.url}${ambient ? " ambient" : ""}`);
       if (req.method === "GET" && req.url?.startsWith("/health")) {
         res.setHeader("Content-Type", "application/json");
         res.statusCode = 200;
@@ -753,6 +759,7 @@ function startFakeCallBridge(opts: FakeCallBridgeOptions): Promise<{
         port,
         calls,
         roots,
+        requests,
         close: () =>
           new Promise<void>((closeResolve) => {
             server.close(() => closeResolve());
@@ -1241,6 +1248,19 @@ describe("callTool pageId routing", () => {
         listPages: "## Pages\n9: https://attacker.example/ [selected]",
       },
     );
+  });
+
+  it("marks only the home-view probe's requests as ambient", async () => {
+    await withFakeBridge(async (fake) => {
+      await callTool("select_page", { pageId: 3 });
+      await expect(getSessionSnapshotIfRunning()).resolves.toBe("ok");
+      expect(fake.requests).toEqual([
+        "GET /health?deep=1",
+        "POST /call",
+        "GET /health ambient",
+        "POST /call ambient",
+      ]);
+    });
   });
 
   it("getSessionSnapshotIfRunning degrades to null when no page is selected", async () => {

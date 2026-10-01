@@ -25,6 +25,7 @@ import {
   handleBridgeServerError,
   isBridgeClientConnected,
   isBridgeTargetReachable,
+  isIdleActivity,
   PAGE_IDENTITY_CHANGED_ERROR,
   parseBridgeCallPayload,
   removePidFile,
@@ -34,6 +35,8 @@ import {
   type BridgeClient,
 } from "../src/bridge.js";
 import { pathToFileURL } from "node:url";
+import { AMBIENT_REQUEST_HEADER } from "../src/bridge-script.js";
+import type { IdleTracker } from "../src/idle.js";
 import {
   clearSelectedPageId,
   getSelectedPageId,
@@ -2218,6 +2221,83 @@ describe("createBridgeServer", () => {
         delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
       else process.env.CHROME_DEVTOOLS_AXI_SESSION = savedSession;
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("idle activity", () => {
+  const fakeRequest = (headers: Record<string, string>) =>
+    ({ headers }) as unknown as IncomingMessage;
+
+  it("counts an accepted request as activity", () => {
+    expect(isIdleActivity(fakeRequest({ host: "127.0.0.1:9224" }))).toBe(true);
+  });
+
+  it("does not count the CLI's ambient probe as activity", () => {
+    expect(
+      isIdleActivity(
+        fakeRequest({ host: "127.0.0.1:9224", [AMBIENT_REQUEST_HEADER]: "1" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not count a request the anti-rebinding gate rejects", () => {
+    expect(isIdleActivity(fakeRequest({ host: "rebound.example:9224" }))).toBe(
+      false,
+    );
+  });
+
+  it("tracks every served request from arrival until its response closes", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      close: async () => {},
+    };
+    const events: string[] = [];
+    const idle: IdleTracker = {
+      begin() {
+        events.push("begin");
+        return (activity) => events.push(`end:${activity}`);
+      },
+    };
+    const server = createBridgeServer(client, "idle-server", idle);
+    const send = (path: string, headers: Record<string, string> = {}) =>
+      new Promise<number | undefined>((done, fail) => {
+        const req = request(
+          { host: "127.0.0.1", port, path, headers },
+          (res) => {
+            res.resume();
+            res.on("end", () => done(res.statusCode));
+          },
+        );
+        req.on("error", fail);
+        req.end();
+      });
+    await new Promise<void>((ready) => {
+      server.listen(0, "127.0.0.1", ready);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      expect(await send("/health")).toBe(200);
+      expect(await send("/health", { [AMBIENT_REQUEST_HEADER]: "1" })).toBe(
+        200,
+      );
+      expect(await send("/health", { host: "rebound.example" })).toBe(403);
+      // The response is sent before its "close" event; let that land.
+      await new Promise((settle) => setImmediate(settle));
+
+      expect(events).toEqual([
+        "begin",
+        "end:true",
+        "begin",
+        "end:false",
+        "begin",
+        "end:false",
+      ]);
+    } finally {
+      await new Promise<void>((closed) => {
+        server.close(() => closed());
+      });
     }
   });
 });

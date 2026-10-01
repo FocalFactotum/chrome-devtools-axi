@@ -100,6 +100,10 @@ environment:
                                     If unset or blank, the bridge uses standalone stdio mode.
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
+  CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
+                                    Opt-in: a bridge started with this set stops itself after
+                                    this many ms with no commands (min: 1000). Unset or 0: the
+                                    bridge runs until 'stop' (default).
 
 gpu:
   Headless Chrome cannot access hardware GPU on most Linux systems.

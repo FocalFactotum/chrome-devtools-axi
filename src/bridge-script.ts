@@ -39,3 +39,12 @@ export const BRIDGE_PORT_IN_USE_EXIT_CODE = 48;
  */
 export const PAGE_IDENTITY_CHANGED_ERROR =
   "The browser reconnected and every page id changed, so this call did not target the page you selected";
+
+/**
+ * Request header the CLI sets to `1` on the SessionStart home-view probe
+ * (`getSessionSnapshotIfRunning`). That probe only observes a bridge that is
+ * already running, so an opted-in idle timeout (`src/idle.ts`) does not count
+ * it as activity: otherwise every new agent session would keep an abandoned
+ * bridge alive.
+ */
+export const AMBIENT_REQUEST_HEADER = "x-chrome-devtools-axi-ambient";
