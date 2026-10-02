@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.37](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.36...chrome-devtools-axi-v0.1.37) (2026-10-01)
+
+
+### Features
+
+* **bridge:** add opt-in idle timeout and exit when the MCP server ends ([#160](https://github.com/kunchenguid/chrome-devtools-axi/issues/160)) ([77a044b](https://github.com/kunchenguid/chrome-devtools-axi/commit/77a044ba9908765a1e796d41567e0cd64ed81339))
+
 ## [0.1.36](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.35...chrome-devtools-axi-v0.1.36) (2026-09-29)
 
 
