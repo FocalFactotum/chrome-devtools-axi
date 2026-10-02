@@ -409,34 +409,105 @@ describe("main", () => {
     expect(String(write.mock.calls[0]?.[0])).toContain(expected);
   });
 
-  it("fails when MCP does not report a saved screenshot path", async () => {
+  it.each([
+    { status: "plain", suffix: "" },
+    {
+      status: "viewport",
+      suffix:
+        '\nEmulating viewport: {"width":390,"height":844,"deviceScaleFactor":1,"isMobile":true,"hasTouch":true}',
+    },
+    { status: "color scheme", suffix: "\nEmulating color scheme: dark" },
+    {
+      status: "offline network",
+      suffix:
+        "\nEmulating network conditions: Offline\nDefault navigation timeout set to 30000 ms",
+    },
+    { status: "user agent", suffix: "\nEmulating user agent: Bot/shot.png." },
+  ])("reports the MCP saved path with $status status", async ({ suffix }) => {
     const write = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
     callTool.mockResolvedValueOnce(
-      "Took a screenshot of the current page's viewport.",
+      `Took a screenshot of the current page's viewport.\nSaved screenshot to /resolved/shot.webp.${suffix}`,
     );
 
     await main(["screenshot", "./shot.png"]);
 
-    expect(callTool).toHaveBeenCalledWith("take_screenshot", {
-      filePath: resolve(process.cwd(), "./shot.png"),
-    });
-    expect(process.exitCode).toBe(1);
     expect(decode(String(write.mock.calls[0]?.[0]))).toEqual({
-      error: "chrome-devtools-mcp did not report a saved screenshot path",
-      code: "BROWSER_ERROR",
+      screenshot: "/resolved/shot.webp",
     });
+    expect(process.exitCode).toBeUndefined();
   });
 
   it.each([
-    { format: undefined, input: "shot.png", output: "shot.webp" },
-    { format: "jpeg", input: "shot.webp", output: "shot.jpeg" },
-    { format: "webp", input: "shot.jpeg", output: "shot.webp" },
-    { format: undefined, input: "shot\nname.png", output: "shot\nname.webp" },
+    {
+      status: "plain",
+      result: "Took a screenshot of the current page's viewport.",
+    },
+    {
+      status: "emulation",
+      result:
+        'Took a screenshot of the current page\'s viewport.\nEmulating viewport: {"width":390,"height":844}',
+    },
   ])(
-    "reports the canonical MCP saved path for format $format",
-    async ({ format, input, output }) => {
+    "fails when MCP has $status status but no saved screenshot path",
+    async ({ result }) => {
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      callTool.mockResolvedValueOnce(result);
+
+      await main(["screenshot", "./shot.png"]);
+
+      expect(callTool).toHaveBeenCalledWith("take_screenshot", {
+        filePath: resolve(process.cwd(), "./shot.png"),
+      });
+      expect(process.exitCode).toBe(1);
+      expect(decode(String(write.mock.calls[0]?.[0]))).toEqual({
+        error: "chrome-devtools-mcp did not report a saved screenshot path",
+        code: "BROWSER_ERROR",
+      });
+    },
+  );
+
+  it.each(
+    [
+      { format: undefined, input: "shot.png", output: "shot.webp" },
+      { format: "jpeg", input: "shot.webp", output: "shot.jpeg" },
+      { format: "webp", input: "shot.jpeg", output: "shot.webp" },
+      { format: undefined, input: "shot\nname.png", output: "shot\nname.webp" },
+      { format: undefined, input: "v1.\nshot.png", output: "v1.\nshot.webp" },
+      {
+        format: undefined,
+        input: "v1.\nEmulating shot.png",
+        output: "v1.\nEmulating shot.webp",
+      },
+      {
+        format: undefined,
+        input: "v1.png.\nshot.png",
+        output: "v1.png.\nshot.webp",
+      },
+      {
+        format: "jpeg",
+        input: "v1.jpeg.\nshot.png",
+        output: "v1.jpeg.\nshot.jpeg",
+      },
+      {
+        format: "webp",
+        input: "v1.webp.\nshot.png",
+        output: "v1.webp.\nshot.webp",
+      },
+    ].flatMap((entry) => [
+      { ...entry, suffix: "" },
+      {
+        ...entry,
+        suffix:
+          '\nEmulating viewport: {"width":390,"height":844}\nEmulating color scheme: dark\nEmulating network conditions: Offline\nDefault navigation timeout set to 30000 ms\nEmulating user agent: Bot/shot.png.',
+      },
+    ]),
+  )(
+    "reports the canonical MCP saved path for $input with format $format and suffix $suffix",
+    async ({ format, input, output, suffix }) => {
       const directory = mkdtempSync(
         join(tmpdir(), "chrome-devtools-axi-shot-"),
       );
@@ -455,7 +526,7 @@ describe("main", () => {
           expect(requested).toBe(resolve(directory, "linked", input));
           const written = join(realpathSync(linkedDirectory), output);
           writeFileSync(written, "fake-screenshot");
-          return `Took a screenshot of the current page's viewport.\nSaved screenshot to ${written}.`;
+          return `Took a screenshot of the current page's viewport.\nSaved screenshot to ${written}.${suffix}`;
         });
 
         const argv = ["screenshot", join("linked", input)];
