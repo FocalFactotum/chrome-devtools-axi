@@ -829,8 +829,7 @@ function findExecutableOnPath(name: string): string | null {
     .flatMap((dir) =>
       dir ? [dir] : process.platform === "win32" ? [] : [process.cwd()],
     );
-  const names =
-    process.platform === "win32" ? [`${name}.exe`, `${name}.cmd`] : [name];
+  const names = process.platform === "win32" ? [`${name}.exe`] : [name];
   for (const dir of dirs) {
     for (const candidate of names) {
       const full = join(dir, candidate);

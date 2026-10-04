@@ -663,7 +663,10 @@ describe("resolveTransportSpec", () => {
       rmSync(dir, { recursive: true, force: true });
     });
 
-    function resolveWithPath(path: string | undefined) {
+    function resolveWithPath(
+      path: string | undefined,
+      platform: NodeJS.Platform = process.platform,
+    ) {
       const env = { ...process.env };
       if (path === undefined) delete env.PATH;
       else env.PATH = path;
@@ -675,6 +678,7 @@ describe("resolveTransportSpec", () => {
           "--input-type=module",
           "-e",
           `import { resolveTransportSpec } from ${JSON.stringify(bridgeUrl)};
+Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} });
 process.stdout.write(JSON.stringify(resolveTransportSpec()));`,
         ],
         {
@@ -685,6 +689,24 @@ process.stdout.write(JSON.stringify(resolveTransportSpec()));`,
       );
       return JSON.parse(output);
     }
+
+    it.each(["cmd", "bat"])(
+      "skips a Windows .%s shim on PATH and falls back to npx",
+      (extension) => {
+        writeFileSync(
+          join(dir, `chrome-devtools-mcp.${extension}`),
+          "@echo off\r\nexit /b 0\r\n",
+        );
+
+        const spec = resolveWithPath(dir, "win32");
+
+        expect(spec.command).toBe("npx");
+        expect(spec.args.slice(0, 2)).toEqual([
+          "-y",
+          "chrome-devtools-mcp@latest",
+        ]);
+      },
+    );
 
     it("does not resolve a cwd executable when PATH is unset", () => {
       const executable = join(dir, executableName);
