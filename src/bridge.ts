@@ -29,13 +29,22 @@ import {
   type ServerResponse,
 } from "node:http";
 import {
+  accessSync,
+  constants as fsConstants,
   existsSync,
   mkdirSync,
   readFileSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  resolve,
+} from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   AMBIENT_REQUEST_HEADER,
@@ -756,6 +765,11 @@ export function buildTransportArgs(): string[] {
 export interface McpPathProbe {
   existsSync: (path: string) => boolean;
   getNpmPrefix: () => string | null;
+  /**
+   * Resolve an executable by name on `PATH`. Optional so a probe that omits it
+   * never touches the host's real `PATH`.
+   */
+  findOnPath?: (name: string) => string | null;
 }
 /**
  * The command and arguments for a stdio-launched chrome-devtools-mcp process.
@@ -802,7 +816,29 @@ const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
       return null;
     }
   },
+  findOnPath: (name) => findExecutableOnPath(name),
 };
+
+function findExecutableOnPath(name: string): string | null {
+  const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  const names =
+    process.platform === "win32" ? [`${name}.exe`, `${name}.cmd`] : [name];
+  for (const dir of dirs) {
+    for (const candidate of names) {
+      const full = join(dir, candidate);
+      try {
+        accessSync(
+          full,
+          process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK,
+        );
+        return full;
+      } catch {
+        // Not here; keep looking.
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Auto-detect a globally-installed chrome-devtools-mcp by probing
@@ -846,8 +882,10 @@ export function detectGlobalMcpPath(
  * service owns Chrome's policy. See README Configuration for the supported
  * dependency and setup.
  *
- * For local mode, detecting a global install avoids npx bootstrap overhead,
- * which can exceed the bridge's readiness deadline on a slow or cold system.
+ * For local mode, detecting an installed chrome-devtools-mcp (npm global
+ * layout, then an executable on PATH) avoids npx bootstrap overhead and
+ * registry access, which can exceed the bridge's readiness deadline or fail
+ * outright on a slow, cold, offline, or sandboxed system.
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -895,6 +933,12 @@ export function resolveTransportSpec(
       command: process.execPath,
       args: [mcpPath, ...mcpArgs.slice(2)],
     };
+  }
+  // An installed binary on PATH avoids the registry round trip `npx` can need,
+  // which fails in offline or sandboxed environments.
+  const pathBinary = probe.findOnPath?.("chrome-devtools-mcp");
+  if (pathBinary) {
+    return { command: pathBinary, args: mcpArgs.slice(2) };
   }
   return { command: "npx", args: mcpArgs };
 }
