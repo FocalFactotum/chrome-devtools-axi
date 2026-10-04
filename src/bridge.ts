@@ -363,8 +363,8 @@ export function didMcpPageIdentityChange(
   // UNVERIFIED DEPENDENCY CONTRACT: this assumes chrome-devtools-mcp emits the
   // reconnect notice as the FIRST line of the flattened body (and, for the
   // sibling matcher in `src/client.ts`, appends `Error: <message>` LAST).
-  // Nothing in the test suite pins that order - chrome-devtools-mcp is spawned
-  // via npx, not installed as a devDependency, so there is no build to assert
+  // Nothing in the test suite pins that order - chrome-devtools-mcp is not
+  // installed as a devDependency, so there is no pinned build to assert
   // against. If upstream reorders, the consequence is a less accurate message,
   // not a silent retarget: `isMissingPageError` is an independent net on the
   // last non-empty line, and upstream hands out page ids from a process-wide
@@ -760,8 +760,9 @@ export function buildTransportArgs(): string[] {
 }
 
 /**
- * Probe interface for {@link detectGlobalMcpPath}. Defaults to real `node:fs`
- * + `npm prefix -g`; injectable for tests.
+ * Local MCP discovery probes for {@link resolveTransportSpec} and
+ * {@link detectGlobalMcpPath}. Defaults to real filesystem, PATH, and
+ * `npm prefix -g` lookups; injectable for tests.
  */
 export interface McpPathProbe {
   existsSync: (path: string) => boolean;
@@ -854,8 +855,8 @@ function findExecutableOnPath(name: string): string | null {
  * `<prefix>/lib/node_modules/...` (POSIX).
  *
  * Returns the resolved path on success, or null if npm is unavailable or the
- * package isn't installed. Used by {@link resolveTransportSpec} only for local
- * mode when no explicit executable is configured.
+ * package isn't installed. Used as a local-mode fallback by
+ * {@link resolveTransportSpec}; see README Configuration for selection order.
  */
 export function detectGlobalMcpPath(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -890,10 +891,10 @@ export function detectGlobalMcpPath(
  * service owns Chrome's policy. See README Configuration for the supported
  * dependency and setup.
  *
- * For local mode, resolution checks the explicit MCP_PATH override, then an
- * executable on PATH, then the npm global layout, avoiding npx bootstrap
- * overhead and registry access, which can exceed the bridge's readiness
- * deadline or fail outright on a slow, cold, offline, or sandboxed system.
+ * See README Configuration for local-mode selection order. Preferring an
+ * installed MCP avoids npx bootstrap overhead and registry access, which can
+ * exceed the bridge's readiness deadline or fail outright on a slow, cold,
+ * offline, or sandboxed system.
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
