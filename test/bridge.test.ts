@@ -600,12 +600,13 @@ describe("resolveTransportSpec", () => {
     expect(spec.command).toBe("npx");
   });
 
-  it("auto-detects a globally-installed chrome-devtools-mcp when MCP_PATH is unset", () => {
+  it("auto-detects a globally-installed chrome-devtools-mcp when MCP_PATH and PATH are unavailable", () => {
     const probe = {
       existsSync: (path: string) =>
         path ===
         "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
-      getNpmPrefix: () => "/usr",
+      getNpmPrefix: vi.fn(() => "/usr"),
+      findOnPath: vi.fn(() => null),
     };
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe(process.execPath);
@@ -615,6 +616,10 @@ describe("resolveTransportSpec", () => {
     expect(spec.args).not.toContain("-y");
     expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
     expect(spec.args).toContain("--isolated");
+    expect(probe.findOnPath).toHaveBeenCalledWith("chrome-devtools-mcp");
+    expect(probe.findOnPath.mock.invocationCallOrder[0]).toBeLessThan(
+      probe.getNpmPrefix.mock.invocationCallOrder[0],
+    );
   });
 
   it("falls back to npx when auto-detection finds nothing", () => {
@@ -662,20 +667,23 @@ describe("resolveTransportSpec", () => {
     );
   });
 
-  it("prefers the npm global install over a PATH executable", () => {
+  it("prefers a PATH executable over the npm global install without invoking npm", () => {
     const globalPath =
       "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js";
     const probe = {
-      existsSync: (path: string) => path === globalPath,
-      getNpmPrefix: () => "/usr",
+      existsSync: vi.fn((path: string) => path === globalPath),
+      getNpmPrefix: vi.fn(() => "/usr"),
       findOnPath: () => "/opt/bin/chrome-devtools-mcp",
     };
     const spec = resolveTransportSpec(probe);
-    expect(spec.command).toBe(process.execPath);
-    expect(spec.args[0]).toBe(globalPath);
+    expect(spec.command).toBe("/opt/bin/chrome-devtools-mcp");
+    expect(spec.args).toContain("--isolated");
+    expect(spec.args).not.toContain(globalPath);
+    expect(probe.getNpmPrefix).not.toHaveBeenCalled();
+    expect(probe.existsSync).not.toHaveBeenCalled();
   });
 
-  it("prefers the Windows npm global layout over a PATH executable", () => {
+  it("prefers a PATH executable over the Windows npm global layout without invoking npm", () => {
     const winPath = join(
       "C:\\npm",
       "node_modules",
@@ -686,13 +694,15 @@ describe("resolveTransportSpec", () => {
       "chrome-devtools-mcp.js",
     );
     const probe = {
-      existsSync: (path: string) => path === winPath,
-      getNpmPrefix: () => "C:\\npm",
+      existsSync: vi.fn((path: string) => path === winPath),
+      getNpmPrefix: vi.fn(() => "C:\\npm"),
       findOnPath: () => "/opt/bin/chrome-devtools-mcp",
     };
     const spec = resolveTransportSpec(probe);
-    expect(spec.command).toBe(process.execPath);
-    expect(spec.args[0]).toBe(winPath);
+    expect(spec.command).toBe("/opt/bin/chrome-devtools-mcp");
+    expect(spec.args).not.toContain(winPath);
+    expect(probe.getNpmPrefix).not.toHaveBeenCalled();
+    expect(probe.existsSync).not.toHaveBeenCalled();
   });
 
   it("falls back to npx when PATH has no chrome-devtools-mcp", () => {
@@ -704,16 +714,18 @@ describe("resolveTransportSpec", () => {
     expect(resolveTransportSpec(probe).command).toBe("npx");
   });
 
-  it("explicit MCP_PATH wins over a PATH executable", () => {
+  it("explicit MCP_PATH wins without probing PATH or npm", () => {
     process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/explicit/override.js";
     const probe = {
       existsSync: () => false,
-      getNpmPrefix: () => null,
-      findOnPath: () => "/opt/bin/chrome-devtools-mcp",
+      getNpmPrefix: vi.fn(() => null),
+      findOnPath: vi.fn(() => "/opt/bin/chrome-devtools-mcp"),
     };
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe(process.execPath);
     expect(spec.args[0]).toBe("/explicit/override.js");
+    expect(probe.findOnPath).not.toHaveBeenCalled();
+    expect(probe.getNpmPrefix).not.toHaveBeenCalled();
   });
 
   it("explicit MCP_PATH always wins over auto-detection", () => {

@@ -882,10 +882,10 @@ export function detectGlobalMcpPath(
  * service owns Chrome's policy. See README Configuration for the supported
  * dependency and setup.
  *
- * For local mode, detecting an installed chrome-devtools-mcp (npm global
- * layout, then an executable on PATH) avoids npx bootstrap overhead and
- * registry access, which can exceed the bridge's readiness deadline or fail
- * outright on a slow, cold, offline, or sandboxed system.
+ * For local mode, resolution checks the explicit MCP_PATH override, then an
+ * executable on PATH, then the npm global layout, avoiding npx bootstrap
+ * overhead and registry access, which can exceed the bridge's readiness
+ * deadline or fail outright on a slow, cold, offline, or sandboxed system.
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -925,6 +925,12 @@ export function resolveTransportSpec(
   }
 
   const mcpArgs = buildTransportArgs();
+  if (!explicitPath) {
+    const pathBinary = probe.findOnPath?.("chrome-devtools-mcp");
+    if (pathBinary) {
+      return { command: pathBinary, args: mcpArgs.slice(2) };
+    }
+  }
   const mcpPath = explicitPath || detectGlobalMcpPath(probe);
   if (mcpPath) {
     // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
@@ -933,12 +939,6 @@ export function resolveTransportSpec(
       command: process.execPath,
       args: [mcpPath, ...mcpArgs.slice(2)],
     };
-  }
-  // An installed binary on PATH avoids the registry round trip `npx` can need,
-  // which fails in offline or sandboxed environments.
-  const pathBinary = probe.findOnPath?.("chrome-devtools-mcp");
-  if (pathBinary) {
-    return { command: pathBinary, args: mcpArgs.slice(2) };
   }
   return { command: "npx", args: mcpArgs };
 }
