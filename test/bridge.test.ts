@@ -683,20 +683,21 @@ process.stdout.write(JSON.stringify(resolveTransportSpec()));`,
       return JSON.parse(output);
     }
 
-    it.skipIf(process.platform === "win32").each([
-      ":missing",
-      "missing::other",
-      "missing:",
-    ])("resolves empty POSIX PATH components from cwd: %s", (path) => {
-      const executable = join(dir, executableName);
-      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    it
+      .skipIf(process.platform === "win32")
+      .each([":missing", "missing::other", "missing:"])(
+      "resolves empty POSIX PATH components from cwd: %s",
+      (path) => {
+        const executable = join(dir, executableName);
+        writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
-      const spec = resolveWithPath(path);
+        const spec = resolveWithPath(path);
 
-      expect(spec.command).toBe(executable);
-      expect(spec.args).toContain("--isolated");
-      expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
-    });
+        expect(spec.command).toBe(executable);
+        expect(spec.args).toContain("--isolated");
+        expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+      },
+    );
 
     it("skips a directory named like the executable for a later regular file", () => {
       const first = join(dir, "first");
