@@ -663,7 +663,10 @@ describe("resolveTransportSpec", () => {
       rmSync(dir, { recursive: true, force: true });
     });
 
-    function resolveWithPath(path: string) {
+    function resolveWithPath(path: string | undefined) {
+      const env = { ...process.env };
+      if (path === undefined) delete env.PATH;
+      else env.PATH = path;
       const output = execFileSync(
         process.execPath,
         [
@@ -676,16 +679,27 @@ process.stdout.write(JSON.stringify(resolveTransportSpec()));`,
         ],
         {
           cwd: dir,
-          env: { ...process.env, PATH: path },
+          env,
           encoding: "utf8",
         },
       );
       return JSON.parse(output);
     }
 
+    it("does not resolve a cwd executable when PATH is unset", () => {
+      const executable = join(dir, executableName);
+      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const spec = resolveWithPath(undefined);
+
+      expect(spec.command).not.toBe(executable);
+      expect(spec.args).not.toContain(executable);
+      expect(spec.args).toContain("--isolated");
+    });
+
     it
       .skipIf(process.platform === "win32")
-      .each([":missing", "missing::other", "missing:"])(
+      .each(["", ":missing", "missing::other", "missing:"])(
       "resolves empty POSIX PATH components from cwd: %s",
       (path) => {
         const executable = join(dir, executableName);

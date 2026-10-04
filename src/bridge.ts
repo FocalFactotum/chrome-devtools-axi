@@ -821,7 +821,9 @@ const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
 };
 
 function findExecutableOnPath(name: string): string | null {
-  const dirs = (process.env.PATH ?? "")
+  const path = process.env.PATH;
+  if (path === undefined) return null;
+  const dirs = path
     .split(delimiter)
     .flatMap((dir) =>
       dir ? [dir] : process.platform === "win32" ? [] : [process.cwd()],
