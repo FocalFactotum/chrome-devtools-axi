@@ -34,6 +34,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -820,13 +821,18 @@ const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
 };
 
 function findExecutableOnPath(name: string): string | null {
-  const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  const dirs = (process.env.PATH ?? "")
+    .split(delimiter)
+    .flatMap((dir) =>
+      dir ? [dir] : process.platform === "win32" ? [] : [process.cwd()],
+    );
   const names =
     process.platform === "win32" ? [`${name}.exe`, `${name}.cmd`] : [name];
   for (const dir of dirs) {
     for (const candidate of names) {
       const full = join(dir, candidate);
       try {
+        if (!statSync(full).isFile()) continue;
         accessSync(
           full,
           process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK,

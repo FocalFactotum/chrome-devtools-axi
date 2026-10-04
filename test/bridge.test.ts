@@ -2,9 +2,15 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { IncomingMessage, ServerResponse, request } from "node:http";
 import { Socket, type AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   buildTransportArgs,
@@ -639,6 +645,73 @@ describe("resolveTransportSpec", () => {
     };
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
+  });
+
+  describe("PATH scanner", () => {
+    let dir: string;
+    const executableName =
+      process.platform === "win32"
+        ? "chrome-devtools-mcp.exe"
+        : "chrome-devtools-mcp";
+    const bridgeUrl = new URL("../src/bridge.ts", import.meta.url).href;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(process.cwd(), ".mcp-path-test-"));
+    });
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    function resolveWithPath(path: string) {
+      const output = execFileSync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `import { resolveTransportSpec } from ${JSON.stringify(bridgeUrl)};
+process.stdout.write(JSON.stringify(resolveTransportSpec()));`,
+        ],
+        {
+          cwd: dir,
+          env: { ...process.env, PATH: path },
+          encoding: "utf8",
+        },
+      );
+      return JSON.parse(output);
+    }
+
+    it.skipIf(process.platform === "win32").each([
+      ":missing",
+      "missing::other",
+      "missing:",
+    ])("resolves empty POSIX PATH components from cwd: %s", (path) => {
+      const executable = join(dir, executableName);
+      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const spec = resolveWithPath(path);
+
+      expect(spec.command).toBe(executable);
+      expect(spec.args).toContain("--isolated");
+      expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    });
+
+    it("skips a directory named like the executable for a later regular file", () => {
+      const first = join(dir, "first");
+      const later = join(dir, "later");
+      mkdirSync(join(first, executableName), { recursive: true });
+      mkdirSync(later);
+      const executable = join(later, executableName);
+      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const spec = resolveWithPath([first, later].join(delimiter));
+
+      expect(spec.command).toBe(executable);
+      expect(spec.args).toContain("--isolated");
+      expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    });
   });
 
   it("uses a chrome-devtools-mcp executable on PATH when no global install is found", () => {
